@@ -2,6 +2,10 @@ import json
 import os
 import time
 import requests
+import mysql.connector
+from dotenv import load_dotenv
+
+load_dotenv()
 
 MAX_POKEMON = 252
 MAX_MOVES_GEN_7 = 354
@@ -96,9 +100,8 @@ def parse_pokemon_moves():
 #       machine
 #   count through all instances of moves and add to list with most hits
 
-# group moves before generation group 7
-# group moves after gen 7 be effects:
-#   normal, high crit, hit*status, hit*attribute
+# create mysql server for housing move_data for
+# ease of access
 def categorize_moves(eff, short_eff):
     for move_id in range(MAX_MOVES_GEN_7, MAX_MOVES):
         move_url = f"{base_url}/move/{move_id}"
