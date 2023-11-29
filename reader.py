@@ -5,12 +5,33 @@ import requests
 import mysql.connector
 from dotenv import load_dotenv
 
-load_dotenv()
+dotenv_path = 'env/credentials.env'
+load_dotenv(dotenv_path)
 
 MAX_POKEMON = 252
 MAX_MOVES_GEN_7 = 354
 MAX_MOVES = 905
 FIRERED_GEN = 7
+
+host = os.getenv('DB_HOST')
+user = os.getenv('DB_USER')
+password = os.environ.get('DB_PASSWORD')
+database = os.environ.get('DB_DATABASE')
+
+print(host, user, password, database)
+
+try:
+    db = mysql.connector.connect(
+            user = user,
+            password = password,
+            host = host,
+            port = 3306,
+            database = database
+        )
+    print("Successful connection")
+    db.close()
+except mysql.connector.Error as err:
+    print("Error connecting to MySQL:", err)
 
 base_url = "https://pokeapi.co/api/v2/"
 
@@ -122,6 +143,7 @@ def categorize_moves(eff, short_eff):
         
 
 def main():
+    pass
     # parse_pokemon_moves()
 
     # __eff__short_eff__
@@ -130,7 +152,8 @@ def main():
     #   damAtrLowr  = "Inflicts regular damage", "to lower"
     #   damAtrRais  = "Inflicts regular damage", "to raise"
     #   damageHeal  = "Inflicts regular damage", "drain"
-    categorize_moves("Inflicts regular damage.", "no additional effect")
+
+    # categorize_moves("Inflicts regular damage.", "no additional effect")
 
 
 if __name__ == "__main__":
