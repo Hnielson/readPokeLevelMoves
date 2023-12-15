@@ -4,156 +4,154 @@ import time
 import requests
 import mysql.connector
 from dotenv import load_dotenv
+import re
 
 dotenv_path = 'env/credentials.env'
 load_dotenv(dotenv_path)
 
-MAX_POKEMON = 252
+MAX_POKEMON = 250
 MAX_MOVES_GEN_7 = 354
 MAX_MOVES = 905
 FIRERED_GEN = 7
 
-host = os.getenv('DB_HOST')
-user = os.getenv('DB_USER')
-password = os.environ.get('DB_PASSWORD')
-database = os.environ.get('DB_DATABASE')
-
-print(host, user, password, database)
-
-try:
-    db = mysql.connector.connect(
-            user = user,
-            password = password,
-            host = host,
-            port = 3306,
-            database = database
-        )
-    print("Successful connection")
-    db.close()
-except mysql.connector.Error as err:
-    print("Error connecting to MySQL:", err)
-
 base_url = "https://pokeapi.co/api/v2/"
 
-def parse_pokemon_moves():
-    for poke_id in range(1, MAX_POKEMON):
-        url = f"{base_url}/pokemon/{poke_id}"
-        response = requests.get(url)
-        if response.status_code == 200:
-            pokemon_data = response.json()
-            poke_name = pokemon_data["name"]
-            moves = pokemon_data["moves"]
+# download *all pokemon data for tables
+# download *all move data for tables
+# in other file parse data from db with weight
 
-            level = []
-            level_count = {}
-            machine = []
-            machine_count = {}
-            tutor = []
-            tutor_count = {}
-            egg = []
-            egg_count = {}
-            for move in moves:
-                learn_method = move["version_group_details"]
-                move_name = move["move"]["name"]
-                for i in learn_method:
-                    method_name = i["move_learn_method"]["name"]
-                    if i["level_learned_at"] > 0:
-                        if move_name in level:
-                            level_count[move_name] += 1
-                        else:
-                            level.append(move_name)
-                            level_count[move_name] = 1
-                    if method_name == "egg":
-                        if move_name in egg:
-                            egg_count[move_name] += 1
-                        else:  
-                            egg.append(move_name)
-                            egg_count[move_name] = 1
-                    if method_name == "machine":
-                        if move_name in machine:
-                            machine_count[move_name] += 1
-                        else:
-                            machine.append(move_name)
-                            machine_count[move_name] = 1
-                    if method_name == "tutor":
-                        if move_name in tutor:
-                            tutor_count[move_name] += 1
-                        else:
-                            tutor.append(move_name)
-                            tutor_count[move_name] = 1
-                    
-            # print(f'\n--{poke_name}--')
-            # print('\n--level--', *((k, v) for k, v in level_count.items()), sep='\n')
-            # print('\n--machine--', *((i, machine_count[i]) for i in machine_count), sep='\n')
-            # print('\n--tutor--', *((k, tutor_count[k]) for k in tutor_count), sep='\n')
-            # print('\n--egg--', *((k, egg_count[k]) for k in egg_count), sep='\n')
+def pokemonLearnReader(db):
+    # get MAX_POKEMON
+    response = requests.get(f"{base_url}/pokemon/?limit={MAX_POKEMON}")
+    if response.status_code == 200:
+        cursor = db.cursor()
 
-            poke_json = {}
-            poke_json["name"] = poke_name
-            poke_json['level'] = level_count
-            poke_json['machine'] = machine_count
-            poke_json['tutor'] = tutor_count
-            poke_json['egg'] = egg_count
+        pokemon_data = response.json()
+        results = pokemon_data["results"]
+        for pokemon in results:
+            # url for each pokemon
+            poke_name = pokemon["name"]
+            poke_url = pokemon["url"]
+            poke_response = requests.get(poke_url)
+            if poke_response.status_code == 200:
+                # mysql json data
+                type1 = poke_response["0"]["type"]["name"]
+                type2 = poke_response["1"]["type"]["name"] if poke_response["1"] else None
+                stats = poke_response["stats"]
+                attack = stats["1"]["base_stat"]
+                spattack = stats["3"]["base_stat"]
+                name = poke_response["name"]
+                moves = poke_response["moves"]
 
-            filename = "pokemoves_db.json"
-            if os.path.isfile(filename) and os.stat(filename).st_size != 0:
-                with open(filename, "r") as file:
-                    existing_data = json.load(file)
-            else:
-                existing_data = []
+                # details for learnsets of pokemon
+                by_level = {}
+                by_machine = {}
+                by_tutor = {}
+                by_egg = {}
+                for move in moves:
+                    # list of gen 3 tutor moves
+                    excluded_moves = ["blast-burn", "frenzy-plant", "hydro-cannon",
+                                      "counter", "double-edge", "dream-eater",
+                                      "explosion", "mega-kick", "mega-punch",
+                                      "metronome", "mimic", "seismic-toss",
+                                      "soft-boiled", "substitute", "thunder-wave",
+                                      "rock-slide", "swords-dance", "fury-cutter",
+                                      "rollout", "swagger", "dynamic-punch", "sleep-talk",
+                                      "nightmare", "self-destruct", "sky-attack"]
 
-            existing_data.append(poke_json)
-            with open(filename, "w") as outfile:
-                json.dump(existing_data, outfile)
+                    move_name = move["move"]["name"]
+                    version_group_details = move["version_group_details"]
+                    for content in version_group_details:
+                        move_learn_method = content["move_learn_method"]
+                        method_name = move_learn_method["name"]
+                        gen = re.search(r"/version-group/(\d+)/", move_learn_method["url"])
 
+                        if content["level_learned_at"] > 0 and method_name == "level-up":
+                            by_level.update({move_name: gen})
+                        if method_name == "egg":
+                            by_egg.update(move_name)
+                        if method_name == "machine":
+                            by_machine.append(move_name)
+                        if method_name == "tutor" and move_name not in excluded_moves:
+                            by_tutor.append(move_name)
+
+                poke_json = {}
+                poke_json["name"] = poke_name
+                # poke_json['level'] = level_count
+                # poke_json['machine'] = machine_count
+                # poke_json['tutor'] = tutor_count
+                # poke_json['egg'] = egg_count
+
+                # filename = "pokemoves_db.json"
+                # if os.path.isfile(filename) and os.stat(filename).st_size != 0:
+                #     with open(filename, "r") as file:
+                #         existing_data = json.load(file)
+                # else:
+                #     existing_data = []
+
+                # existing_data.append(poke_json)
+                # with open(filename, "w") as outfile:
+                #     json.dump(existing_data, outfile)
+
+        
             time.sleep(2)
+        db.commit()
+    else:
+        print("Response request unsuccessful. Status Code", response.status_code)    
 
-        else:
-            print("Response request unsuccessful. Status Code", response.status_code)
-            break    
 
-# download all pokemon 1-251
-#   download all moves that each can learn
-#   separate moves by:
-#       egg
-#       tutor
-#       level
-#       machine
-#   count through all instances of moves and add to list with most hits
+def moveDetailsReader(db):
+    response = requests.get(f"{base_url}/move/?limit={MAX_MOVES}")
+    if response.status_code == 200:
+        cursor = db.cursor()
 
-# create mysql server for housing move_data for
-# ease of access
-def categorize_moves(eff, short_eff):
-    for move_id in range(MAX_MOVES_GEN_7, MAX_MOVES):
-        move_url = f"{base_url}/move/{move_id}"
-        response = requests.get(move_url)
-        if response.status_code == 200:
-            move_data = response.json() # moves
-            name = move_data["name"]
-            id = move_data["id"]
-            if len(move_data["effect_entries"]) > 0:
-                temp = move_data["effect_entries"][0]
+        move_data = response.json() # move info
+        for move_id in move_data["results"]:
+            move_name = move_id["name"]
+            move_response = requests.get(f"{base_url}/move/{move_name}")
+
+            relevent_pokemon = [pokemon for pokemon in move_response["learned_by_pokemon"]
+                                if re.search(r"/pokemon/(\d+)/", pokemon["url"]) < MAX_POKEMON] # empty if no original pokemon can learn this move
+            if relevent_pokemon and len(move_response["effect_entries"]) > 0: # check for non-null effects
+                # insert into moves table
+                temp = move_response["effect_entries"][0]
                 effect = temp["effect"]
                 short_effect = temp["short_effect"]
-                if eff in effect and short_eff in short_effect:
-                    print(f"{id} {name}: {short_effect}")
-        else:
-            print("Categorize moves request unsuccessful. Status Code", response.status_code)
-        time.sleep(2)
+                power = move_response["power"]
+                accuracy = move_response["accuracy"]
+                name = move_response["name"]
+                target = move_response["target"]["name"]
+                type = move_response["type"]["name"]
+                id = move_response["id"]
+
+                insert_query = "INSERT INTO moves (id, name, type, power, accuracy, effect, short_effect, target) VALUES (%d, %s, %s, %d, %d, %s, %s, %s)"
+                moves_values = (id, name, type, power, accuracy, effect, short_effect, target)
+                cursor.execute(insert_query, moves_values)
+                
+            time.sleep(2)
+        db.commit()
+    else:
+        print("Categorize moves request unsuccessful. Status Code", response.status_code)
+    time.sleep(2)
         
 
 def main():
-    pass
-    # parse_pokemon_moves()
+    try:
+        db = mysql.connector.connect(
+                user = os.environ.get('DB_USER'),
+                password = os.environ.get('DB_PASSWORD'),
+                host = os.environ.get('DB_HOST'),
+                port = 3306,
+                database = os.environ.get('DB_DATABASE')
+            )
+        print("Successful connection")
 
-    # __eff__short_eff__
-    #   normal      = "inflicts regular damage", "no additional effect"
-    #   crit        = "inflicts regular damage", "crit"
-    #   damAtrLowr  = "Inflicts regular damage", "to lower"
-    #   damAtrRais  = "Inflicts regular damage", "to raise"
-    #   damageHeal  = "Inflicts regular damage", "drain"
+        pokemonLearnReader(db)
+        moveDetailsReader(db)
 
-    # categorize_moves("Inflicts regular damage.", "no additional effect")
+        db.close()
+    except mysql.connector.Error as err:
+        print("Error connecting to MySQL:", err)
 
 
 if __name__ == "__main__":
