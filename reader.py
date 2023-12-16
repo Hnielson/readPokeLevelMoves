@@ -22,7 +22,8 @@ base_url = "https://pokeapi.co/api/v2/"
 
 def pokemonLearnReader(db):
     # get MAX_POKEMON
-    response = requests.get(f"{base_url}/pokemon/?limit={MAX_POKEMON}")
+    # response = requests.get(f"{base_url}/pokemon/?limit={MAX_POKEMON}")
+    response = requests.get(f"{base_url}/pokemon/?limit=1")
     if response.status_code == 200:
         cursor = db.cursor()
 
@@ -35,19 +36,25 @@ def pokemonLearnReader(db):
             poke_response = requests.get(poke_url)
             if poke_response.status_code == 200:
                 # mysql json data
-                type1 = poke_response["0"]["type"]["name"]
-                type2 = poke_response["1"]["type"]["name"] if poke_response["1"] else None
-                stats = poke_response["stats"]
-                attack = stats["1"]["base_stat"]
-                spattack = stats["3"]["base_stat"]
-                name = poke_response["name"]
-                moves = poke_response["moves"]
+                poke_info = poke_response.json()
+                # print(f"{poke_info}")
+                type1 = poke_info["types"][0]["type"]["name"]
+                type2 = poke_info["types"][1]["type"]["name"] if poke_info["types"][1] else None
+                stats = poke_info["stats"]
+                attack = stats[1]["base_stat"]
+                spattack = stats[3]["base_stat"]
+                name = poke_info["name"]
+                moves = poke_info["moves"]
 
                 # details for learnsets of pokemon
                 by_level = {}
+                level_gen = []
                 by_machine = {}
+                machine_gen = []
                 by_tutor = {}
+                tutor_gen = []
                 by_egg = {}
+                egg_gen = []
                 for move in moves:
                     # list of gen 3 tutor moves
                     excluded_moves = ["blast-burn", "frenzy-plant", "hydro-cannon",
@@ -66,17 +73,31 @@ def pokemonLearnReader(db):
                         method_name = move_learn_method["name"]
                         gen = re.search(r"/version-group/(\d+)/", move_learn_method["url"])
 
-                        if content["level_learned_at"] > 0 and method_name == "level-up":
-                            by_level.update({move_name: gen})
+                        if content["level_learned_at"] > 0 and method_name == "level-up" and move_name not in excluded_moves:
+                            if move_name not in by_level:
+                                by_level.update({move_name: level_gen})
+                            by_level[move_name].append(gen)
                         if method_name == "egg":
-                            by_egg.update(move_name)
+                            if move_name not in by_egg:
+                                by_egg.update({move_name: egg_gen})
+                            by_egg[move_name].append(gen)
                         if method_name == "machine":
-                            by_machine.append(move_name)
+                            if move_name not in by_machine:
+                                by_machine.update({move_name: machine_gen})
+                            by_machine[move_name].append(gen)
                         if method_name == "tutor" and move_name not in excluded_moves:
-                            by_tutor.append(move_name)
+                            if move_name not in by_tutor:
+                                by_tutor.update({move_name: tutor_gen})                            
+                            by_tutor[move_name].append(gen)
 
-                poke_json = {}
-                poke_json["name"] = poke_name
+                # insert mysql query
+
+                for key, val in by_level.items():
+                    print(f"{key}, {val}")
+
+                # poke_json = {}
+                # poke_json["name"] = poke_name
+
                 # poke_json['level'] = level_count
                 # poke_json['machine'] = machine_count
                 # poke_json['tutor'] = tutor_count
@@ -147,7 +168,7 @@ def main():
         print("Successful connection")
 
         pokemonLearnReader(db)
-        moveDetailsReader(db)
+        # moveDetailsReader(db)
 
         db.close()
     except mysql.connector.Error as err:
