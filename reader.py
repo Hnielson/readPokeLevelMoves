@@ -24,6 +24,7 @@ EXCLUDED_MOVES = ["blast-burn", "frenzy-plant", "hydro-cannon",
                     "rollout", "swagger", "dynamic-punch", "sleep-talk",
                     "nightmare", "self-destruct", "sky-attack"]
 
+
 base_url = "https://pokeapi.co/api/v2/"
 
 # download *all pokemon data for tables
@@ -33,7 +34,7 @@ base_url = "https://pokeapi.co/api/v2/"
 def pokemonLearnReader(db):
     # get MAX_POKEMON
     # response = requests.get(f"{base_url}/pokemon/?limit={MAX_POKEMON}")
-    response = requests.get(f"{base_url}/pokemon/?limit=2")
+    response = requests.get(f"{base_url}/pokemon/?limit=6s")
     if response.status_code == 200:
         cursor = db.cursor()
 
@@ -48,12 +49,13 @@ def pokemonLearnReader(db):
                 # mysql json data
                 poke_info = poke_response.json()
                 type1 = poke_info["types"][0]["type"]["name"]
-                type2 = poke_info["types"][1]["type"]["name"] if poke_info["types"][1] else None
+                type2 = poke_info["types"][1]["type"]["name"] if len(poke_info["types"]) > 1 else None
                 stats = poke_info["stats"]
                 attack = stats[1]["base_stat"]
                 spattack = stats[3]["base_stat"]
                 name = poke_info["name"]
                 moves = poke_info["moves"]
+                # print(f"{type1}, {type2}, {attack}, {spattack}, {name}")
 
                 # learnsets of pokemon
                 by_level = {}
@@ -91,8 +93,8 @@ def pokemonLearnReader(db):
 
                 # insert mysql query
 
-                for key, val in by_level.items():
-                    print(f"{key}, {val}")
+                # for key, val in by_level.items():
+                #     print(f"{key}, {val}")
 
                 # poke_json = {}
                 # poke_json["name"] = poke_name
@@ -121,7 +123,8 @@ def pokemonLearnReader(db):
 
 
 def moveDetailsReader(db):
-    response = requests.get(f"{base_url}/move/?limit={MAX_MOVES}")
+    # response = requests.get(f"{base_url}/move/?limit={MAX_MOVES}")
+    response = requests.get(f"{base_url}/move/?limit=333")
     if response.status_code == 200:
         cursor = db.cursor()
 
@@ -129,24 +132,28 @@ def moveDetailsReader(db):
         for move_id in move_data["results"]:
             move_name = move_id["name"]
             move_response = requests.get(f"{base_url}/move/{move_name}")
+            if move_response.status_code == 200:
+                move_info = move_response.json()
+                relevent_pokemon = [pokemon["name"] for pokemon in move_info["learned_by_pokemon"]
+                                    if int(re.search(r"/pokemon/(\d+)/", pokemon["url"]).group(1)) < MAX_POKEMON] # empty if no original pokemon can learn this move
+                print(f"{relevent_pokemon}")
+                if relevent_pokemon and len(move_info["effect_entries"]) > 0: # check for non-null effects
+                    # insert into moves table
+                    temp = move_info["effect_entries"][0]
+                    effect = temp["effect"]
+                    short_effect = temp["short_effect"]
+                    power = move_info["power"]
+                    accuracy = move_info["accuracy"]
+                    name = move_info["name"]
+                    target = move_info["target"]["name"]
+                    type = move_info["type"]["name"]
+                    id = move_info["id"]
 
-            relevent_pokemon = [pokemon for pokemon in move_response["learned_by_pokemon"]
-                                if int(re.search(r"/pokemon/(\d+)/", pokemon["url"]).group(1)) < MAX_POKEMON] # empty if no original pokemon can learn this move
-            if relevent_pokemon and len(move_response["effect_entries"]) > 0: # check for non-null effects
-                # insert into moves table
-                temp = move_response["effect_entries"][0]
-                effect = temp["effect"]
-                short_effect = temp["short_effect"]
-                power = move_response["power"]
-                accuracy = move_response["accuracy"]
-                name = move_response["name"]
-                target = move_response["target"]["name"]
-                type = move_response["type"]["name"]
-                id = move_response["id"]
+                    print(f"{effect}\n{short_effect}\n{power}, {accuracy}, {name}, {target}, {type}, {id}")
 
-                insert_query = "INSERT INTO moves (id, name, type, power, accuracy, effect, short_effect, target) VALUES (%d, %s, %s, %d, %d, %s, %s, %s)"
-                moves_values = (id, name, type, power, accuracy, effect, short_effect, target)
-                cursor.execute(insert_query, moves_values)
+                    # insert_query = "INSERT INTO moves (id, name, type, power, accuracy, effect, short_effect, target) VALUES (%d, %s, %s, %d, %d, %s, %s, %s)"
+                    # moves_values = (id, name, type, power, accuracy, effect, short_effect, target)
+                    # cursor.execute(insert_query, moves_values)
                 
             time.sleep(2)
         db.commit()
@@ -166,8 +173,8 @@ def main():
             )
         print("Successful connection")
 
-        pokemonLearnReader(db)
-        # moveDetailsReader(db)
+        # pokemonLearnReader(db)
+        moveDetailsReader(db)
 
         db.close()
     except mysql.connector.Error as err:
