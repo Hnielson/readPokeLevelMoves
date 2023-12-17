@@ -14,6 +14,16 @@ MAX_MOVES_GEN_7 = 354
 MAX_MOVES = 905
 FIRERED_GEN = 7
 
+# list of gen 3 tutor moves
+EXCLUDED_MOVES = ["blast-burn", "frenzy-plant", "hydro-cannon",
+                    "counter", "double-edge", "dream-eater",
+                    "explosion", "mega-kick", "mega-punch",
+                    "metronome", "mimic", "seismic-toss",
+                    "soft-boiled", "substitute", "thunder-wave",
+                    "rock-slide", "swords-dance", "fury-cutter",
+                    "rollout", "swagger", "dynamic-punch", "sleep-talk",
+                    "nightmare", "self-destruct", "sky-attack"]
+
 base_url = "https://pokeapi.co/api/v2/"
 
 # download *all pokemon data for tables
@@ -23,7 +33,7 @@ base_url = "https://pokeapi.co/api/v2/"
 def pokemonLearnReader(db):
     # get MAX_POKEMON
     # response = requests.get(f"{base_url}/pokemon/?limit={MAX_POKEMON}")
-    response = requests.get(f"{base_url}/pokemon/?limit=1")
+    response = requests.get(f"{base_url}/pokemon/?limit=2")
     if response.status_code == 200:
         cursor = db.cursor()
 
@@ -37,7 +47,6 @@ def pokemonLearnReader(db):
             if poke_response.status_code == 200:
                 # mysql json data
                 poke_info = poke_response.json()
-                # print(f"{poke_info}")
                 type1 = poke_info["types"][0]["type"]["name"]
                 type2 = poke_info["types"][1]["type"]["name"] if poke_info["types"][1] else None
                 stats = poke_info["stats"]
@@ -46,34 +55,24 @@ def pokemonLearnReader(db):
                 name = poke_info["name"]
                 moves = poke_info["moves"]
 
-                # details for learnsets of pokemon
+                # learnsets of pokemon
                 by_level = {}
-                level_gen = []
                 by_machine = {}
-                machine_gen = []
                 by_tutor = {}
-                tutor_gen = []
                 by_egg = {}
-                egg_gen = []
                 for move in moves:
-                    # list of gen 3 tutor moves
-                    excluded_moves = ["blast-burn", "frenzy-plant", "hydro-cannon",
-                                      "counter", "double-edge", "dream-eater",
-                                      "explosion", "mega-kick", "mega-punch",
-                                      "metronome", "mimic", "seismic-toss",
-                                      "soft-boiled", "substitute", "thunder-wave",
-                                      "rock-slide", "swords-dance", "fury-cutter",
-                                      "rollout", "swagger", "dynamic-punch", "sleep-talk",
-                                      "nightmare", "self-destruct", "sky-attack"]
-
+                    level_gen = []
+                    machine_gen = []
+                    tutor_gen = []    
+                    egg_gen = []
                     move_name = move["move"]["name"]
                     version_group_details = move["version_group_details"]
                     for content in version_group_details:
                         move_learn_method = content["move_learn_method"]
                         method_name = move_learn_method["name"]
-                        gen = re.search(r"/version-group/(\d+)/", move_learn_method["url"])
+                        gen = re.search(r"/version-group/(\d+)/$", content["version_group"]["url"]).group(1)
 
-                        if content["level_learned_at"] > 0 and method_name == "level-up" and move_name not in excluded_moves:
+                        if content["level_learned_at"] > 0 and method_name == "level-up" and move_name not in EXCLUDED_MOVES:
                             if move_name not in by_level:
                                 by_level.update({move_name: level_gen})
                             by_level[move_name].append(gen)
@@ -85,7 +84,7 @@ def pokemonLearnReader(db):
                             if move_name not in by_machine:
                                 by_machine.update({move_name: machine_gen})
                             by_machine[move_name].append(gen)
-                        if method_name == "tutor" and move_name not in excluded_moves:
+                        if method_name == "tutor" and move_name not in EXCLUDED_MOVES:
                             if move_name not in by_tutor:
                                 by_tutor.update({move_name: tutor_gen})                            
                             by_tutor[move_name].append(gen)
@@ -132,7 +131,7 @@ def moveDetailsReader(db):
             move_response = requests.get(f"{base_url}/move/{move_name}")
 
             relevent_pokemon = [pokemon for pokemon in move_response["learned_by_pokemon"]
-                                if re.search(r"/pokemon/(\d+)/", pokemon["url"]) < MAX_POKEMON] # empty if no original pokemon can learn this move
+                                if int(re.search(r"/pokemon/(\d+)/", pokemon["url"]).group(1)) < MAX_POKEMON] # empty if no original pokemon can learn this move
             if relevent_pokemon and len(move_response["effect_entries"]) > 0: # check for non-null effects
                 # insert into moves table
                 temp = move_response["effect_entries"][0]
