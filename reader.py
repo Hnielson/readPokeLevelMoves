@@ -27,14 +27,9 @@ EXCLUDED_MOVES = ["blast-burn", "frenzy-plant", "hydro-cannon",
 
 base_url = "https://pokeapi.co/api/v2/"
 
-# download *all pokemon data for tables
-# download *all move data for tables
-# in other file parse data from db with weight
-
 def pokemonLearnReader(db):
     # get MAX_POKEMON
-    # response = requests.get(f"{base_url}/pokemon/?limit={MAX_POKEMON}")
-    response = requests.get(f"{base_url}/pokemon/?limit=6s")
+    response = requests.get(f"{base_url}/pokemon/?limit={MAX_POKEMON}")
     if response.status_code == 200:
         cursor = db.cursor()
 
@@ -92,39 +87,27 @@ def pokemonLearnReader(db):
                             by_tutor[move_name].append(gen)
 
                 # insert mysql query
-
-                # for key, val in by_level.items():
-                #     print(f"{key}, {val}")
-
-                # poke_json = {}
-                # poke_json["name"] = poke_name
-
-                # poke_json['level'] = level_count
-                # poke_json['machine'] = machine_count
-                # poke_json['tutor'] = tutor_count
-                # poke_json['egg'] = egg_count
-
-                # filename = "pokemoves_db.json"
-                # if os.path.isfile(filename) and os.stat(filename).st_size != 0:
-                #     with open(filename, "r") as file:
-                #         existing_data = json.load(file)
-                # else:
-                #     existing_data = []
-
-                # existing_data.append(poke_json)
-                # with open(filename, "w") as outfile:
-                #     json.dump(existing_data, outfile)
+                # make by_level, etc., a json dump
+                level_json = json.dumps(by_level)
+                machine_json = json.dumps(by_machine)
+                tutor_json = json.dumps(by_tutor)
+                egg_json = json.dumps(by_egg)
+                insert_query = "INSERT INTO pokemon (name, attack, spattack, by_level, by_machine, by_tutor, by_breeding, type1, type2) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+                pokemon_values = (name, attack, spattack, level_json, machine_json, tutor_json, egg_json, type1, type2)
+                try:
+                    cursor.execute(insert_query, pokemon_values)
+                except mysql.connector.Error as err:
+                    print("didn't have all parameters:", err)
 
         
-            time.sleep(2)
+            time.sleep(1)
         db.commit()
     else:
         print("Response request unsuccessful. Status Code", response.status_code)    
 
 
 def moveDetailsReader(db):
-    # response = requests.get(f"{base_url}/move/?limit={MAX_MOVES}")
-    response = requests.get(f"{base_url}/move/?limit=333")
+    response = requests.get(f"{base_url}/move/?limit={MAX_MOVES}")
     if response.status_code == 200:
         cursor = db.cursor()
 
@@ -136,8 +119,7 @@ def moveDetailsReader(db):
                 move_info = move_response.json()
                 relevent_pokemon = [pokemon["name"] for pokemon in move_info["learned_by_pokemon"]
                                     if int(re.search(r"/pokemon/(\d+)/", pokemon["url"]).group(1)) < MAX_POKEMON] # empty if no original pokemon can learn this move
-                print(f"{relevent_pokemon}")
-                if relevent_pokemon and len(move_info["effect_entries"]) > 0: # check for non-null effects
+                if len(relevent_pokemon) > 0 and len(move_info["effect_entries"]) > 0: # check for non-null effects
                     # insert into moves table
                     temp = move_info["effect_entries"][0]
                     effect = temp["effect"]
@@ -149,13 +131,11 @@ def moveDetailsReader(db):
                     type = move_info["type"]["name"]
                     id = move_info["id"]
 
-                    print(f"{effect}\n{short_effect}\n{power}, {accuracy}, {name}, {target}, {type}, {id}")
-
-                    # insert_query = "INSERT INTO moves (id, name, type, power, accuracy, effect, short_effect, target) VALUES (%d, %s, %s, %d, %d, %s, %s, %s)"
-                    # moves_values = (id, name, type, power, accuracy, effect, short_effect, target)
-                    # cursor.execute(insert_query, moves_values)
+                    insert_query = "INSERT INTO moves (id, name, type, power, accuracy, effect, short_effect, target) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)"
+                    moves_values = (id, name, type, power, accuracy, effect, short_effect, target)
+                    cursor.execute(insert_query, moves_values)
                 
-            time.sleep(2)
+            time.sleep(1)
         db.commit()
     else:
         print("Categorize moves request unsuccessful. Status Code", response.status_code)
@@ -173,9 +153,8 @@ def main():
             )
         print("Successful connection")
 
-        # pokemonLearnReader(db)
+        pokemonLearnReader(db)
         moveDetailsReader(db)
-
         db.close()
     except mysql.connector.Error as err:
         print("Error connecting to MySQL:", err)
