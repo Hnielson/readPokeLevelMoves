@@ -77,7 +77,10 @@ immunity_dict = {"normal": ["ghost"],
                  "psychic": ["dark"],
                  "dragon": ["fairy"]
                  }
-known_short_effs = {}
+damage_type_dict = {"physical": ["normal", "fighting", "flying", "bug", "rock", "ground", "dark", "poison", "steel"],
+                    "special": ["electric", "grass", "water", "fire", "ghost", "dragon", "ice", "psychic", "fairy"]
+                    }
+known_short_effs = []
 
 # weight moves
 # normal weight - gen 3 moves
@@ -86,13 +89,22 @@ known_short_effs = {}
 # type weakness coverage based on atk or spatk
 
 EFF_KNOWN = 1
-TYPE_WEAKNESS_COVERAGE = 1
+TYPE_WEAKNESS_COVERAGE = 1.5
+ATTACK_ALIGNMENT = .75
 LEVEL_W_GEN3 = 1
-STAB = .5
-OTHER_W = .5
+POWER = 1
+STAB = .75
+OTHER_W = .25
 
 def moveListConstructor(db):
     cursor = db.cursor()
+    # get all unique short effects that are currently known in gen 3
+    short_effs_query = "WITH CTE AS (SELECT DISTINCT id, name, short_effect, row_number() OVER (PARTITION BY short_effect ORDER BY id ASC) RN FROM moves) SELECT * FROM cte WHERE RN = 1 AND id<=354 ORDER BY id ASC"
+    cursor.execute(short_effs_query)
+    for res in cursor.fetchall():
+        known_short_effs.append(res[2])
+
+    # TODO loop through all pokemon
     # query pokemon
     poke_query = "SELECT name, type1, type2, attack, spattack, by_level, by_tutor, by_machine, by_breeding FROM pokemon WHERE name = 'bulbasaur'"
     cursor.execute(poke_query)
@@ -102,8 +114,15 @@ def moveListConstructor(db):
     by_tutor = json.loads(tutor_temp)
     by_machine = json.loads(machine_temp)
     by_egg = json.loads(egg_temp)
-    # print(name, attack, spattack, by_level["leech-seed"], by_tutor["string-shot"], by_machine['solar-beam'])
 
+    # check attack alignment
+    physical = None
+    if attack > spattack and (attack - spattack) >= 20:
+        physical = True
+    if attack < spattack and (spattack - attack) >= 20:
+        physical = False
+
+    # find types for attacks to counter pokemon's counters
     weak_combo = []
     if type2 == None:
         weak_combo = weakness_dict[type1]
@@ -120,38 +139,67 @@ def moveListConstructor(db):
             if j not in weak_coverage:
                 weak_coverage.append(j)
 
-    stats = (attack, spattack)
+    types = (type1, type2)
     # new dict for all moves weights
     weight_dict = {}
-    addWeights(stats, weak_coverage, weight_dict, by_level, True, db)
-    addWeights(stats, weak_coverage, weight_dict, by_tutor, False, db)
-    addWeights(stats, weak_coverage, weight_dict, by_machine, False, db)
-    addWeights(stats, weak_coverage, weight_dict, by_egg, False, db)
+    addWeights(types, physical, weak_coverage, weight_dict, by_level, True, db)
+    addWeights(types, physical, weak_coverage, weight_dict, by_tutor, False, db)
+    addWeights(types, physical, weak_coverage, weight_dict, by_machine, False, db)
+    addWeights(types, physical, weak_coverage, weight_dict, by_egg, False, db)
 
     top_moves = sorted(weight_dict.items(), key=lambda x:x[1], reverse=True)
     [print(move, val) for move, val in top_moves[:13]]
 
 
-def addWeights(stats, coverage, weight_dict, learn_dict, by_level, db):
-    attack = stats[0]
-    spattack = stats[1]
+def addWeights(poke_types, physical, coverage, weight_dict, learn_dict, by_level, db):   
     cursor = db.cursor()
-    # for t in weak_coverage:
-    #     type_query = f"SELECT name FROM moves WHERE type = '{t}' AND power IS NOT NULL"
-    # TODO weight learned by level or not
-    # TODO db query for move types coverage
-    # TODO compare attack stats
+    # print("Analyzing new learn_dict")
+    # search through learn_dicts
     for key, val in learn_dict.items():
-        if key not in weight_dict:
-            weight_dict[key] = 0
-        for v in val:
-            if int(v) <= GEN3 and by_level:
-                weight_dict[key] += LEVEL_W_GEN3
-            if int(v):
-                pass
-            if not by_level:
-                weight_dict[key] += OTHER_W
-        # print(f"{key}, {poke_dict[key]}")
+        # print(f"{key}")
+        # if GEN3 not in val: ########################
+            if key not in weight_dict:
+                weight_dict[key] = 0
+            # db query -- what is the type if the current move
+            type_query = f"SELECT type, short_effect, power FROM moves WHERE name = '{key}'"
+            cursor.execute(type_query)
+            move_type, short_eff, power = cursor.fetchone()
+            # TODO remove gen 3 machine/tutor moves from the list
+
+            # by_level
+            if by_level:
+                # print(f"    + by level")
+                for gen in val:
+                    if int(gen) <= GEN3:
+                        weight_dict[key] += LEVEL_W_GEN3
+                    else:
+                        weight_dict[key] += OTHER_W
+            # STAB weight
+            if move_type in poke_types:
+                weight_dict[key] += STAB
+                # print(f"    + stab")
+            # coverage weight
+            if move_type in coverage:
+                weight_dict[key] += TYPE_WEAKNESS_COVERAGE
+                # print(f"    + coverage")
+            # attack type alignment weight
+            if physical != None:
+                if physical and move_type in damage_type_dict["physical"]:
+                    weight_dict[key] += ATTACK_ALIGNMENT
+                    # print(f"    + physical preference")
+                if not physical and move_type in damage_type_dict["special"]:
+                    weight_dict[key] += ATTACK_ALIGNMENT
+                    # print(f"    + special preference")
+            # known short effects
+            if short_eff in known_short_effs:
+                weight_dict[key] += EFF_KNOWN
+                # print(f"    + known effect")
+            # preference for attack moves
+            if power != None:
+                weight_dict[key] += POWER
+                # print(f"    + attack")
+        
+    # print()
 
 def main():
     try:
